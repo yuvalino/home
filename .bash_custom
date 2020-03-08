@@ -1,0 +1,104 @@
+
+### MAKE ###
+export ROOT_TOOLCHAINS="$(realpath ~/installs/toolchains)"
+export ANDROID_PATH="${ROOT_TOOLCHAINS}/android/arm"
+
+
+### NDK ###
+export ANDROID_NDK_PATH=~/installs/android-ndk
+
+export ANDROID_DEFAULT_NDK=android
+export ANDROID_DEFAULT_ARCH=arm
+export ANDROID_DEFAULT_CC=arm-linux-androideabi-
+
+#export ANDROID_PATH=${GMAKE_BUILDTOOLCHAINS}/${ANDROID_DEFAULT_NDK}/${ANDROID_DEFAULT_ARCH}
+#export ANDROID_BIN=${ANDROID_PATH}/bin
+#export ANDROID_CC=${ANDROID_BIN}/${ANDROID_DEFAULT_CC}
+
+
+
+
+export ANDROID_OBJDUMP=${ANDROID_CC}-objdump
+
+### GDB ###
+
+ndk_gdb_file() {
+
+    local REMOTE_FILE=$1
+    local LOCAL_GDB="${ANDROID_BIN}/gdb"
+    local REMOTE_GDBSERVER="/data/local/tmp/gdbserver"
+    local ADB_PORT=4884
+    local SLEEP_TIME=1
+    
+    
+    adb forward tcp:${ADB_PORT} tcp:${ADB_PORT}
+
+    adb shell ${REMOTE_GDBSERVER} :${ADB_PORT} ${REMOTE_FILE} &
+
+    local REMOTE_GDBSERVER_PROC=$!
+
+    sleep ${SLEEP_TIME};
+
+    ${LOCAL_GDB} -ex "tar rem :${ADB_PORT}"
+
+    kill -9 ${REMOTE_GDBSERVER_PROC}
+}
+
+### ADB ###
+
+adb_run() {
+    local LOCAL_FILE=$1
+    local TMP="/data/local/tmp"
+    local REMOTE_FILE="${TMP}/$(basename $LOCAL_FILE)"
+
+    shift 1
+
+    adb push ${LOCAL_FILE} ${REMOTE_FILE}
+    adb shell chmod 777 ${REMOTE_FILE}
+    adb shell "${REMOTE_FILE} $@"
+}
+
+adb_pushbin() {
+    local LOCAL_FILE=$1
+    local TMP="/data/local/tmp"
+
+    adb push ${LOCAL_FILE} "${TMP}/$(basename $LOCAL_FILE)"
+}
+
+adb_run_su() {
+
+    local LOCAL_FILE="$1"
+    local TMP_FILE="/data/local/tmp/$(basename $LOCAL_FILE)"
+    local MNT_FILE="/mnt/obb/$(basename $LOCAL_FILE)"
+
+    shift
+
+    adb push $LOCAL_FILE $TMP_FILE
+    adb shell su -c "dd if=$TMP_FILE of=$MNT_FILE"
+    adb shell su -c "chmod 777 $MNT_FILE"
+    adb shell su -c "$MNT_FILE $@"
+}
+
+### MISC ###
+
+dss()
+{
+    local INPUT=$1
+    
+    echo -en $(python2 -c "print '$1'.decode('hex'),") > /tmp/ds.tmp
+    shift
+
+    objdump -bbinary -mi386 $@ -D /tmp/ds.tmp | tail -n+8
+
+}
+ass()
+{
+    local INPUT=$1
+
+    echo -en ".global _start\n.text\n_start:\n$INPUT" > /tmp/as.S
+    shift
+
+    gcc $@ -m32 -pie -nostdlib /tmp/as.S -o /tmp/as.o
+    objcopy /tmp/as.o --dump-section .text=/tmp/as.raw
+    objdump -bbinary -mi386 -D /tmp/as.raw | tail -n+8
+}
